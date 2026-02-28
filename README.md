@@ -1,69 +1,88 @@
-# Xilinx Boot Image Loader for IDA Pro
+<h1 align="center">xilinx-boot-loader</h1>
 
-This is a native IDA Pro loader module for the **Xilinx Zynq / Versal / Spartan Boot Image (BOOT.BIN / .pdi)** formats. It dynamically detects and parses Boot Headers, Image Header Tables, and Partition Headers across multiple generations of AMD/Xilinx System-on-Chips, cleanly mapping out Bootloaders (FSBL/PLM) and subsequent executable partitions into their intended memory locations.
+<p align="center">
+  <code>C++23</code> &middot; <code>idax-powered</code> &middot; <code>Decoupled Engine</code> &middot; <code>Zero-Copy Extraction</code>
+</p>
 
-Written in modern **C++23**, the loader relies on the [idax](https://github.com/19h/idax) wrapper to safely interface with the IDA SDK. The parsing engine is completely decoupled from the IDA SDK, allowing high-performance and extensive headless unit testing.
+---
 
-## Supported Architectures
-
-* **Zynq 7000 SoC** (`BOOT.BIN`)
-* **Zynq UltraScale+ MPSoC** (`BOOT.BIN`)
-* **Versal Adaptive SoC** (`.pdi`)
-* **Spartan UltraScale+** (`.pdi`)
-* **Versal AI Edge Series Gen 2 / Versal Prime Series Gen 2** (`.pdi`)
+<h5 align="center">
+ xilinx-boot-loader is an IDA Pro module for parsing Xilinx boot firmware.<br/>
+ It dynamically maps monolithic BOOT.BIN and PDI files into discrete memory segments,<br/>
+ isolating multi-stage bootloaders, programmable logic, and firmware partitions.<br/>
+<br/>
+ Nested headers are traversed. Embedded segment names are extracted.<br/>
+ Hardware-specific load addresses are routed natively to IDA's analysis engine.<br/>
+ Automatically recovering the entire execution chain from Zynq 7000 to Versal adaptive SoCs.
+</h5>
 
 ## Features
 
-- **Format Recognition:** Automatically detects Xilinx image families via the `XNLX` (`0x584C4E58`) magic signature and specific width detection checks (at offsets `0x10` and `0x20` respectively).
-- **Boot Header Parsing:** Extracts and prints detailed logging about the Boot Header, PLM (Platform Loader and Manager), PMC Data, and FSBL execution and load addresses.
-- **Partition Layout & Mapping (Zynq):** Safely walks the nested Image Header Table to dynamically extract, map, and size all active partitions (such as PMUFW, FSBL, ATF, U-Boot, and baremetal applications).
-- **PLM & Data Extraction (Versal/Spartan):** Maps the Platform Loader and Manager (PLM) directly to execution RAM (e.g. `0xF0280000`) and unpacks embedded Programmable Logic / PMC CDO data.
-- **Dynamic Segment Naming:** Automatically unpacks `Image Name` strings encoded within the header to assign correct names to mapped IDA segments (`Zynq7007_miner.bit`, `u_boot.elf`, `FSBL.elf`, etc).
-- **Entry Points Registration:** Automatically resolves and registers partition entry points, allowing IDA's auto-analysis to efficiently kick off on multiple firmware stages simultaneously.
-- **Fallback Mechanism:** Implements intelligent fallback to direct FSBL extraction if the Image Header Table is stripped or corrupt.
+The loader automatically detects and unpacks multiple generations of Xilinx System-on-Chip firmware, completely abstracting the complex header indirection into clear, strictly bounded IDA memory segments.
 
-## Requirements
+- **Dynamic Format Detection:** Reliably targets and discriminates architectures via `XNLX` (`0x584C4E58`) signatures and specific width-detection bytes mapped across both legacy `.bin` and modern `.pdi` locations.
+- **Deep Partition Mapping:** Recursively walks the nested Image Header Tables. It maps out First Stage Boot Loaders (FSBL), Platform Loader and Managers (PLM), Platform Management Controller (PMC) data, and unencrypted hardware partitions without massive IDB bloat.
+- **String Table Unpacking:** Recovers packed big-endian segment names natively encoded in the firmware (e.g. `u_boot.elf`, `Zynq7007_miner.bit`) and assigns them directly to IDA segments for unmatched clarity.
+- **Concurrent Entry Points:** Automatically derives exact execution addresses for all viable binary partitions and pushes them into IDA's entry table, guaranteeing comprehensive multi-stage auto-analysis.
+- **Headless & Decoupled Engine:** The structure-parsing core (`src/parser.cpp`) runs entirely independent of the IDA SDK via an abstract `Reader` interface. It guarantees high-performance headless batch processing (like `idump`) and enables extensive raw-buffer unit testing.
 
-- **IDA Pro 9.x**
-- **idax** (C++23 IDA wrapper library - fetched automatically via CMake)
-- **CMake 3.27+**
-- **C++23** compatible compiler (Apple Clang 17+, GCC 13+, MSVC 19.38+)
+## Supported Architectures
 
-## Build Instructions
+* **Zynq 7000 SoC** (`BOOT.BIN`) - Support for legacy sequential partition header arrays
+* **Zynq UltraScale+ MPSoC** (`BOOT.BIN`) - Full pointer-linked nested boot hierarchy parsing
+* **Versal Adaptive SoC** (`.pdi`) - High-level Meta-Header parsing & PMC load routing
+* **Spartan UltraScale+** (`.pdi`)
+* **Versal AI Edge Series Gen 2 / Versal Prime Series Gen 2** (`.pdi`)
 
-This project includes a convenient `Makefile` wrapping the native CMake preset architecture.
+## The Decoupled Architecture
 
-### Quick Start
+Unlike traditional IDA loaders that deeply entangle internal SDK logic (`qlread`, `qoff64_t`) directly into format parsing, `xilinx-boot-loader` strictly isolates the domain constraints.
 
-```bash
-# Build the loader module in release mode (optimized)
-make loader
+```cpp
+// 1. A pure abstract parsing boundary. Zero IDA SDK leakage.
+struct Reader {
+    virtual bool read_bytes(uint64_t offset, void* buffer, size_t size) = 0;
+};
+
+// 2. The core format engine returns a well-formed value object
+xilinx::ParsedImage img = xilinx::parse_image(reader);
+
+// 3. The thin idax Loader class merely executes the mapping commands
+for (const auto& part : img.partitions) {
+    ida::segment::create(part.load_address, part.load_address + part.data_size, part.name, ...);
+    ida::loader::file_to_database(file.handle(), part.data_offset, part.load_address, part.data_size, true);
+    ida::entry::add(part.exec_address, part.name + "_entry");
+}
 ```
 
-The compiled loader module will be generated inside the `build-release-optimized` directory.
+This strict architectural separation permits massive performance wins, complete fuzzing capability, and enables a highly reliable `make test` pipeline that verifies tricky Xilinx pointer boundary math without ever booting the IDA runtime.
 
-### Available Make Targets
+## Building
 
-- `make loader`: Build the loader in Release mode with aggressive optimizations (recommended).
-- `make loader-debug`: Build the loader in Debug mode (preserves debug symbols for loader development).
-- `make test`: Run headless C++ unit tests to verify parser structures and boundaries.
-- `make clean`: Clean intermediate build artifacts, keeping CMake config caches.
-- `make purge`: Wipe all build directories and reset the CMake environment.
+### Requirements
+- CMake 3.27+
+- C++23 Compiler (Clang 16+ / GCC 13+ / MSVC 19.38+)
+- IDA Pro 9.3 SDK
+- `idax` C++23 SDK wrapper (Automatically fetched via CMake)
 
-## Tests
+### Build Instructions
 
-The underlying format parser is completely abstracted from the IDA runtime and thoroughly tested against raw buffer mocks, validating padding layouts (like the Zynq 7000 continuous arrays vs. MPSoC linked lists), boundary constraints, and string extraction schemes without booting IDA.
+The project uses CMakePresets wrapped by a simple Makefile for human-friendly execution:
 
 ```bash
+# Build the highly optimized release loader
+make loader
+
+# Run the headless C++ parsing unit tests
 make test
 ```
 
-## Installation & Usage
+### Installation
 
-1. Move the compiled loader binary (e.g., `zynqmp_boot_image_loader.dylib` on macOS, `.dll` on Windows, or `.so` on Linux) into your IDA `loaders/` directory.
-2. Open IDA Pro and load your `BOOT.BIN` or `.pdi` firmware image.
-3. In the initial "Load a new file" dialog, choose the appropriate **Xilinx** option (e.g., *Xilinx Zynq 7000 Boot Image*, *Xilinx Zynq UltraScale+ Boot Image*, or *Xilinx Versal/Spartan PDI*).
-4. Let the loader automatically orchestrate the segments and entry points, and begin your analysis!
+1. Copy the compiled artifact (`build-release-optimized/zynqmp_boot_image_loader.dylib` on macOS, `.dll` on Windows, or `.so` on Linux) directly into your IDA installation's `loaders/` directory.
+2. Open IDA and drag-and-drop a `BOOT.BIN` or `.pdi` firmware file.
+3. The format detection will identify the exact Xilinx variant. Select it and press OK.
+4. Let the loader orchestrate the specific hardware layout and begin your analysis.
 
 ## License
 
