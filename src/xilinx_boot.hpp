@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstddef>
 
 namespace xilinx {
 
@@ -103,7 +104,7 @@ namespace zynqmp {
         uint32_t first_image_header_offset;     // 0x0C
         uint32_t header_authentication_certificate; // 0x10
         uint32_t secondary_boot_device; // 0x14
-        uint32_t padding[8];            // 0x18
+        uint32_t padding[9];            // 0x18
         uint32_t checksum;              // 0x3C
     };
 
@@ -244,5 +245,41 @@ namespace versal {
         uint32_t header_checksum;                      // 0x7C
     };
 } // namespace versal
+
+static_assert(sizeof(zynq7000::BootHeader) == 0xA0, "zynq7000::BootHeader size mismatch");
+static_assert(sizeof(zynq7000::RegisterInitTable) == 0x800, "zynq7000::RegisterInitTable size mismatch");
+static_assert(sizeof(zynq7000::ImageHeaderTable) == 0x14, "zynq7000::ImageHeaderTable size mismatch");
+static_assert(sizeof(zynq7000::PartitionHeader) == 0x40, "zynq7000::PartitionHeader size mismatch");
+static_assert(offsetof(zynq7000::BootHeader, image_header_table_offset) == 0x98,
+              "zynq7000::BootHeader::image_header_table_offset offset mismatch");
+static_assert(offsetof(zynq7000::BootHeader, partition_header_table_offset) == 0x9C,
+              "zynq7000::BootHeader::partition_header_table_offset offset mismatch");
+static_assert(offsetof(zynq7000::PartitionHeader, ac_offset) == 0x28,
+              "zynq7000::PartitionHeader::ac_offset offset mismatch");
+
+static_assert(sizeof(zynqmp::BootHeader) == 0xB8, "zynqmp::BootHeader size mismatch");
+static_assert(sizeof(zynqmp::RegisterInitTable) == 0x800, "zynqmp::RegisterInitTable size mismatch");
+static_assert(sizeof(zynqmp::PufHelperData) == 0x608, "zynqmp::PufHelperData size mismatch");
+static_assert(sizeof(zynqmp::ImageHeaderTable) == 0x40, "zynqmp::ImageHeaderTable size mismatch");
+static_assert(sizeof(zynqmp::PartitionHeader) == 0x40, "zynqmp::PartitionHeader size mismatch");
+static_assert(offsetof(zynqmp::BootHeader, secure_header_iv) == 0xA0,
+              "zynqmp::BootHeader::secure_header_iv offset mismatch");
+static_assert(offsetof(zynqmp::PartitionHeader, ac_offset) == 0x34,
+              "zynqmp::PartitionHeader::ac_offset offset mismatch");
+
+static_assert(sizeof(versal::BootHeader) == 0x128, "versal::BootHeader size mismatch");
+static_assert(sizeof(versal::RegisterInitTable) == 0x800, "versal::RegisterInitTable size mismatch");
+static_assert(sizeof(versal::PufHelperData) == 0x608, "versal::PufHelperData size mismatch");
+static_assert(sizeof(versal::ImageHeaderTable) == 0x80, "versal::ImageHeaderTable size mismatch");
+static_assert(sizeof(versal::ImageHeader) == 0x40, "versal::ImageHeader size mismatch");
+static_assert(sizeof(versal::PartitionHeader) == 0x80, "versal::PartitionHeader size mismatch");
+static_assert(offsetof(versal::BootHeader, meta_header_offset) == 0xC4,
+              "versal::BootHeader::meta_header_offset offset mismatch");
+static_assert(offsetof(versal::PartitionHeader, hash_block_ac_offset) == 0x34,
+              "versal::PartitionHeader::hash_block_ac_offset offset mismatch");
+static_assert(offsetof(versal::PartitionHeader, encryption_key_select) == 0x44,
+              "versal::PartitionHeader::encryption_key_select offset mismatch");
+static_assert(offsetof(versal::PartitionHeader, header_checksum) == 0x7C,
+              "versal::PartitionHeader::header_checksum offset mismatch");
 
 } // namespace xilinx
