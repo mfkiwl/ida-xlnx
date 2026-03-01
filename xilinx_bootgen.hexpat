@@ -1,9 +1,11 @@
 #pragma endian little
-#pragma description Xilinx Zynq UltraScale+ Boot Image
+#pragma description Xilinx Zynq UltraScale+ Boot Image (ZynqMP)
 #pragma MIME application/x-xilinx-boot-zynqmp
 #pragma magic [ 58 4E 4C 58 ] @ 0x24
 
 // Spec: Xilinx UG1283 https://docs.xilinx.com/r/en-US/ug1283-bootgen-user-guide/Zynq-UltraScale-MPSoC-Boot-and-Configuration
+// NOTE: This hexpat currently models ZynqMP structures only.
+// Versal Gen1/Gen2 and Spartan UltraScale+ layouts are intentionally unsupported here.
 
 import type.magic;
 import std.io;
@@ -23,7 +25,7 @@ fn format_u32_string(auto arr) {
 };
 
 fn pointer_word(auto offset) {
-    return u128(offset) * 3;
+    return u128(offset) * 4;
 };
 
 // Based on std::ptr::NullablePtr
@@ -166,8 +168,6 @@ namespace zynqmp {
         None = 0,
         Ps = 1,
         Pl = 2,
-        Pmu = 3,
-        Xip = 4,
     };
 
     enum A5xExecState : u8 {
@@ -227,7 +227,7 @@ namespace zynqmp {
     };
 
     struct ImageHeader {
-        NullableWordPtr<ImageHeader, u32> image_header;
+        NullableWordPtr<ImageHeader, u32> next_image_header_offset;
 
         NullableWordPtr<PartitionHeader, u32> corresponding_partition_header;
 
@@ -256,7 +256,7 @@ namespace zynqmp {
         u32 count_of_image_header;
         u32 first_partition_header_offset;
 
-        NullableWordPtr<ImageHeader, u32> image_header_table_offset;
+        NullableWordPtr<ImageHeader, u32> first_image_header_offset;
 
         NullableWordPtr<AuthenticationCertificates, u32> header_authentication_certificate;
 
