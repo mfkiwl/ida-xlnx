@@ -8,35 +8,19 @@
 // Versal Gen1/Gen2 and Spartan UltraScale+ layouts are intentionally unsupported here.
 
 import type.magic;
-import std.io;
-import std.mem;
-import std.array;
-import std.ptr;
 
 fn format_u32_string(auto arr) {
     str result = "";
     for (u32 i = 0, i < sizeof(arr) / 4, i = i + 1) {
+        if (arr[i] == 0x0) {
+            break;
+        }
         result += char((arr[i] >> 24) & 0xff);
         result += char((arr[i] >> 16) & 0xff);
         result += char((arr[i] >>  8) & 0xff);
         result += char((arr[i]      ) & 0xff);
     }
     return result;
-};
-
-fn pointer_word(auto offset) {
-    return u128(offset) * 4;
-};
-
-// Based on std::ptr::NullablePtr
-// Pointer addresses 4-byte words
-struct NullableWordPtr<PointeeTy, PointerTy> {
-    PointerTy pointerValue [[no_unique_address, hidden]];
-    if (pointerValue == 0x0) {
-        padding[sizeof(PointerTy)];
-    } else {
-        PointeeTy *data : PointerTy [[pointer_base("pointer_word"),inline]];
-    }
 };
 
 namespace zynqmp {
@@ -209,31 +193,31 @@ namespace zynqmp {
         u32 unencrypted_data_word_length;
         u32 total_partition_word_length;
 
-        NullableWordPtr<PartitionHeader, u32> next_partition_header_offset;
+        u32 next_partition_header_offset;
 
         u64 destination_execution_address;
         u64 destination_load_address;
-        NullableWordPtr<std::Array<u8,parent.encrypted_partition_data_word_length*4>, u32> actual_partition_word_offset;
+        u32 actual_partition_word_offset;
 
         PartitionAttributeBits attributes;
         u32 section_count;
         u32 checksum_word_offset;
         u32 image_header_word_offset;
 
-        NullableWordPtr<AuthenticationCertificates, u32> ac_offset;
+        u32 ac_offset;
 
         u32 partition_number;
         u32 header_checksum;
     };
 
     struct ImageHeader {
-        NullableWordPtr<ImageHeader, u32> next_image_header_offset;
+        u32 next_image_header_offset;
 
-        NullableWordPtr<PartitionHeader, u32> corresponding_partition_header;
+        u32 corresponding_partition_header;
 
         padding[4];
         u32 partition_count;
-        u32 image_name[] [[format("format_u32_string")]];
+        u32 image_name[16] [[format("format_u32_string")]];
     };
 
     enum BootDevice : u32 {
@@ -256,9 +240,9 @@ namespace zynqmp {
         u32 count_of_image_header;
         u32 first_partition_header_offset;
 
-        NullableWordPtr<ImageHeader, u32> first_image_header_offset;
+        u32 first_image_header_offset;
 
-        NullableWordPtr<AuthenticationCertificates, u32> header_authentication_certificate;
+        u32 header_authentication_certificate;
 
         BootDevice secondary_boot_device;
         padding[36];
@@ -346,7 +330,7 @@ namespace zynqmp {
         u32 shutter_value;
         u32 user_defined_fields[10];
 
-        std::ptr::NullablePtr<ImageHeaderTable, u32> image_header_table_offset;
+        u32 image_header_table_offset;
 
         u32 partition_header_table_offset;
         u32 secure_header_iv[3];
@@ -356,14 +340,6 @@ namespace zynqmp {
             PufHelperData puf_helper_data @ 0x8b8;
         }
 
-        if (source_offset > 0) {
-            if (pmu_image_length > 0) {
-                u8 pmu_firmware[total_pmu_fw_length] @ source_offset;
-                u8 fsbl[total_fsbl_length] @ source_offset + total_pmu_fw_length;
-            } else {
-                u8 fsbl[total_fsbl_length] @ source_offset;
-            }
-        }
     };
 
     struct DeviceBootImage {
