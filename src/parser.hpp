@@ -73,6 +73,13 @@ struct ProcessorSelection {
     std::string source;
 };
 
+struct AuthCertificateInfo {
+    bool present = false;
+    uint64_t offset = 0;
+    bool header_readable = false;
+    std::vector<uint32_t> header_words;
+};
+
 struct PartitionInfo {
     uint64_t load_address = 0;
     uint64_t exec_address = 0;
@@ -83,6 +90,11 @@ struct PartitionInfo {
     bool has_auth_certificate = false;
     PartitionChecksumType checksum_type = PartitionChecksumType::Unknown;
     PartitionHashAlgorithm hash_algo = PartitionHashAlgorithm::Unknown;
+    AuthCertificateInfo auth_certificate;
+    bool partition_iv_present = false;
+    std::vector<uint32_t> partition_iv;
+    bool partition_iv_kek_present = false;
+    std::vector<uint32_t> partition_iv_kek;
     ProcessorFamily processor_family = ProcessorFamily::Unknown;
     DestinationCpu destination_cpu = DestinationCpu::Unknown;
     ArmBitnessHint arm_bitness_hint = ArmBitnessHint::Unknown;
@@ -146,6 +158,9 @@ struct BootHeaderMetadata {
 
     bool obfuscated_black_key_iv_present = false;
     std::vector<uint32_t> obfuscated_black_key_iv;
+
+    bool key_rolling_present = false;
+    std::vector<uint32_t> key_rolling_words;
 
     bool black_iv_present = false;
     std::vector<uint32_t> black_iv;

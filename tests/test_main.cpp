@@ -126,6 +126,7 @@ void test_zynqmp_detection() {
     bh->obfuscated_black_key_iv[0] = 0xAAAAAAA1;
     bh->obfuscated_black_key_iv[1] = 0xAAAAAAA2;
     bh->obfuscated_black_key_iv[2] = 0xAAAAAAA3;
+    bh->obfuscated_black_key_storage[0] = 0xCAFEBABE;
     
     auto img = parse_image(reader);
     assert(img.arch == Arch::ZynqMP);
@@ -145,6 +146,9 @@ void test_zynqmp_detection() {
     assert(img.boot_header.obfuscated_black_key_iv_present);
     assert(img.boot_header.obfuscated_black_key_iv.size() == 3);
     assert(img.boot_header.obfuscated_black_key_iv[2] == 0xAAAAAAA3);
+    assert(img.boot_header.key_rolling_present);
+    assert(img.boot_header.key_rolling_words.size() == 8);
+    assert(img.boot_header.key_rolling_words[0] == 0xCAFEBABE);
     const auto* fsbl_attr = find_boot_attr(img, "fsbl_image_attributes");
     assert(fsbl_attr != nullptr);
     assert(fsbl_attr->value == 0x123);
@@ -226,6 +230,10 @@ void test_versal_detection() {
     write_u32(0x1000 + 0x10, 0x200 / 4);  // partition header offset (word)
     write_u32(0x1000 + 0x28, 0x49445046); // FPDI
     write_u32(0x1000 + 0x58, 3);          // optional data length (words)
+    write_u32(0x1000 + 0x48, 0x700 / 4);  // meta-header AC offset
+    write_u32(0x1000 + 0x5C, 0x740 / 4);  // auth header offset
+    write_u32(0x1000 + 0x60, 4);          // hash block length (words)
+    write_u32(0x1000 + 0x64, 0x780 / 4);  // hash block offset
 
     const uint32_t opt_entry_header = (3u << 16) | 0x21u;
     const uint32_t opt_entry_data = 0x11223344u;
@@ -265,6 +273,25 @@ void test_versal_detection() {
     assert(puf_diag != nullptr);
     assert(puf_diag->present);
     assert(puf_diag->bounds_valid);
+    const auto* meta_ac_attr = find_boot_attr(img, "meta_header_ac_offset");
+    assert(meta_ac_attr != nullptr);
+    assert(meta_ac_attr->value == 0x700 / 4);
+    const auto* auth_hdr_attr = find_boot_attr(img, "authentication_header");
+    assert(auth_hdr_attr != nullptr);
+    assert(auth_hdr_attr->value == 0x740 / 4);
+    const auto* hash_block_attr = find_boot_attr(img, "hash_block_offset");
+    assert(hash_block_attr != nullptr);
+    assert(hash_block_attr->value == 0x780 / 4);
+    const auto* meta_ac_range = find_range(img, "META_HEADER_AUTH_CERTIFICATE");
+    assert(meta_ac_range != nullptr);
+    assert(meta_ac_range->offset == 0x700);
+    const auto* auth_hdr_range = find_range(img, "AUTHENTICATION_HEADER");
+    assert(auth_hdr_range != nullptr);
+    assert(auth_hdr_range->offset == 0x740);
+    const auto* hash_block_range = find_range(img, "HASH_BLOCK");
+    assert(hash_block_range != nullptr);
+    assert(hash_block_range->offset == 0x780);
+    assert(hash_block_range->length == 16);
     assert(img.boot_header.optional_data_entries.size() == 1);
     assert(img.boot_header.optional_data_entries[0].id == 0x21);
     assert(img.boot_header.optional_data_entries[0].size_words == 3);
@@ -305,6 +332,12 @@ void test_zynqmp_partition_attr_decode() {
     ph2->attributes = (2u << 8) | (1u << 3) | (1u << 7) | (3u << 12) | (1u << 15); // A53-1, AArch32, encrypted, SHA3, auth
     ph2->ac_offset = 0x500 / 4;
 
+    uint32_t* ac_header = reinterpret_cast<uint32_t*>(reader.data.data() + 0x500);
+    ac_header[0] = 0x43455254; // "CERT"
+    ac_header[1] = 0x00000002;
+    ac_header[2] = 0x00000020;
+    ac_header[3] = 0x01234567;
+
     auto img = parse_image(reader);
     assert(img.arch == Arch::ZynqMP);
     assert(img.partitions.size() == 3);
@@ -321,6 +354,11 @@ void test_zynqmp_partition_attr_decode() {
     assert(img.partitions[2].arm_bitness_hint == ArmBitnessHint::AArch32);
     assert(img.partitions[2].is_encrypted);
     assert(img.partitions[2].has_auth_certificate);
+    assert(img.partitions[2].auth_certificate.present);
+    assert(img.partitions[2].auth_certificate.offset == 0x500);
+    assert(img.partitions[2].auth_certificate.header_readable);
+    assert(img.partitions[2].auth_certificate.header_words.size() == 4);
+    assert(img.partitions[2].auth_certificate.header_words[0] == 0x43455254);
     assert(img.partitions[2].checksum_type == PartitionChecksumType::Sha3);
     assert(img.partitions[2].hash_algo == PartitionHashAlgorithm::Sha3);
     assert(!img.partitions[2].security_warnings.empty());
@@ -452,6 +490,13 @@ void test_zynq7000_partitions() {
     ph1->destination_execution_address = 0x10000000;
     ph1->data_word_offset = 0x1000 / 4;
     ph1->image_header_word_offset = 0x800 / 4;
+    ph1->ac_offset = 0x300 / 4;
+
+    uint32_t* ac_header = reinterpret_cast<uint32_t*>(reader.data.data() + 0x300);
+    ac_header[0] = 0x43455254; // "CERT"
+    ac_header[1] = 0x00000001;
+    ac_header[2] = 0x00000010;
+    ac_header[3] = 0x89ABCDEF;
     
     // Set image name for PH1 at 0x800
     uint8_t packed[] = { 'L', 'B', 'S', 'F', 'E', '.', '0', '1', '\0', '\0', 'F', 'L', 0,0,0,0 };
@@ -469,6 +514,12 @@ void test_zynq7000_partitions() {
     assert(img.partitions[0].name == "FSBL10.ELF");
     assert(img.partitions[0].load_address == 0x10000000);
     assert(img.partitions[0].data_size == 1024);
+    assert(img.partitions[0].has_auth_certificate);
+    assert(img.partitions[0].auth_certificate.present);
+    assert(img.partitions[0].auth_certificate.offset == 0x300);
+    assert(img.partitions[0].auth_certificate.header_readable);
+    assert(img.partitions[0].auth_certificate.header_words.size() == 4);
+    assert(img.partitions[0].auth_certificate.header_words[0] == 0x43455254);
     
     std::cout << "[OK] zynq7000_partitions" << std::endl;
 }
@@ -519,7 +570,19 @@ void test_versal_partitions() {
     ph1->attributes = (2u << 8) | (1u << 3); // A72-1, AArch32
     ph1->encryption_key_select = 0xA5C3C5A3;
     ph1->hash_block_ac_offset = 0x700 / 4;
+    ph1->iv[0] = 0x11111111;
+    ph1->iv[1] = 0x22222222;
+    ph1->iv[2] = 0x33333333;
+    ph1->iv_kek_decryption[0] = 0x44444444;
+    ph1->iv_kek_decryption[1] = 0x55555555;
+    ph1->iv_kek_decryption[2] = 0x66666666;
     ph1->next_partition_header_offset = 0; // End of list
+
+    uint32_t* ac_header = reinterpret_cast<uint32_t*>(reader.data.data() + 0x700);
+    ac_header[0] = 0x43455254; // "CERT"
+    ac_header[1] = 0x00000003;
+    ac_header[2] = 0x00000030;
+    ac_header[3] = 0x76543210;
     
     auto img = parse_image(reader);
     assert(img.arch == Arch::VersalGen1);
@@ -547,6 +610,17 @@ void test_versal_partitions() {
     assert(img.partitions[2].arm_bitness_hint == ArmBitnessHint::AArch32);
     assert(img.partitions[2].is_encrypted);
     assert(img.partitions[2].has_auth_certificate);
+    assert(img.partitions[2].auth_certificate.present);
+    assert(img.partitions[2].auth_certificate.offset == 0x700);
+    assert(img.partitions[2].auth_certificate.header_readable);
+    assert(img.partitions[2].auth_certificate.header_words.size() == 4);
+    assert(img.partitions[2].auth_certificate.header_words[0] == 0x43455254);
+    assert(img.partitions[2].partition_iv_present);
+    assert(img.partitions[2].partition_iv.size() == 3);
+    assert(img.partitions[2].partition_iv[0] == 0x11111111);
+    assert(img.partitions[2].partition_iv_kek_present);
+    assert(img.partitions[2].partition_iv_kek.size() == 3);
+    assert(img.partitions[2].partition_iv_kek[0] == 0x44444444);
     assert(!img.partitions[2].security_warnings.empty());
     assert(img.partitions[2].load_address == 0xAAAAAAAABBBBBBBBULL);
     assert(img.partitions[2].exec_address == 0xCCCCCCCCDDDDDDDDULL);

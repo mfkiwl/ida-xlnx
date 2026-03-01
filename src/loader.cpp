@@ -56,6 +56,10 @@ public:
             return std::unexpected(ida::Error::unsupported(msg));
         }
 
+        for (const auto& security_warning : img.security_warnings) {
+            ida::ui::message("SECURITY WARNING: " + security_warning + "\n");
+        }
+
         auto proc_status = ida::loader::set_processor(img.processor_name);
         if (!proc_status) {
             return std::unexpected(proc_status.error());
@@ -80,17 +84,33 @@ public:
                 continue;
             }
 
+            const bool auth_blob_overlaps_payload =
+                part.auth_certificate.present && part.auth_certificate.offset == part.data_offset;
+            if (auth_blob_overlaps_payload) {
+                ida::ui::message("SECURITY WARNING: Skipping partition '" + part.name +
+                                 "' because payload offset points at authentication-certificate metadata.\n");
+                count++;
+                continue;
+            }
+
+            const bool encrypted_payload = part.is_encrypted;
+
             ida::ui::message(" - " + part.name + ": Load=0x" + std::to_string(part.load_address) + 
                              " Size=0x" + std::to_string(part.data_size) + "\n");
-                             
+                              
             if (part.data_size > 0 && part.load_address != 0xFFFFFFFF) {
+                const char* segment_class = encrypted_payload ? "DATA" : "CODE";
+                const auto segment_type = encrypted_payload ? ida::segment::Type::Data : ida::segment::Type::Code;
                 ida::segment::create(
                     static_cast<ida::Address>(part.load_address),
                     static_cast<ida::Address>(part.load_address + part.data_size),
-                    part.name, "CODE", ida::segment::Type::Code
+                    part.name, segment_class, segment_type
                 );
                 ida::loader::file_to_database(file.handle(), part.data_offset, static_cast<ida::Address>(part.load_address), part.data_size, true);
-                if (part.exec_address != 0 && part.exec_address != 0xFFFFFFFF) {
+                if (encrypted_payload && part.exec_address != 0 && part.exec_address != 0xFFFFFFFF) {
+                    ida::ui::message("SECURITY WARNING: Not creating entry point for encrypted partition '" +
+                                     part.name + "'.\n");
+                } else if (part.exec_address != 0 && part.exec_address != 0xFFFFFFFF) {
                     ida::entry::add(count, static_cast<ida::Address>(part.exec_address), part.name + "_entry");
                 }
             }

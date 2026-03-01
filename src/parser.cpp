@@ -567,6 +567,26 @@ static bool has_valid_word_offset(uint32_t value) {
     return value != 0 && value != 0xFFFFFFFF;
 }
 
+static void parse_auth_certificate_from_word_offset(Reader& reader,
+                                                    uint32_t word_offset,
+                                                    AuthCertificateInfo& auth_certificate) {
+    auth_certificate = AuthCertificateInfo{};
+    if (!has_valid_word_offset(word_offset)) {
+        return;
+    }
+
+    auth_certificate.present = true;
+    auth_certificate.offset = static_cast<uint64_t>(word_offset) * 4;
+
+    uint32_t header_words[4] = {0, 0, 0, 0};
+    if (!reader.read_bytes(auth_certificate.offset, header_words, sizeof(header_words))) {
+        return;
+    }
+
+    auth_certificate.header_readable = true;
+    auth_certificate.header_words.assign(header_words, header_words + 4);
+}
+
 static void add_partition_security_warning(PartitionInfo& part,
                                            ParsedImage& img,
                                            const std::string& warning_message) {
@@ -1072,6 +1092,18 @@ static void parse_zynq7000(Reader& reader, ParsedImage& img, LogCallback logger)
         return;
     }
 
+    add_boot_attribute(img,
+                       "iht_header_authentication_certificate",
+                       iht.header_authentication_certificate);
+    if (has_valid_word_offset(iht.header_authentication_certificate)) {
+        add_boot_image_range(img,
+                             reader,
+                             logger,
+                             "IHT_AUTH_CERTIFICATE",
+                             static_cast<uint64_t>(iht.header_authentication_certificate) * 4,
+                             16);
+    }
+
     uint32_t max_images = iht.count_of_image_header;
     if (max_images == 0 || max_images == 0xFFFFFFFF) {
         max_images = 64;
@@ -1103,7 +1135,8 @@ static void parse_zynq7000(Reader& reader, ParsedImage& img, LogCallback logger)
         pinfo.data_offset = ph.data_word_offset * 4;
         pinfo.data_size = ph.unencrypted_partition_length * 4;
         pinfo.is_encrypted = is_present_length(ph.encrypted_partition_length);
-        pinfo.has_auth_certificate = has_valid_word_offset(ph.ac_offset) || (((ph.attributes >> 15) & 0x1) != 0);
+        parse_auth_certificate_from_word_offset(reader, ph.ac_offset, pinfo.auth_certificate);
+        pinfo.has_auth_certificate = pinfo.auth_certificate.present || (((ph.attributes >> 15) & 0x1) != 0);
         pinfo.checksum_type = decode_zynq7000_checksum_type(ph.attributes);
         pinfo.hash_algo = hash_algo_for_checksum_type(pinfo.checksum_type);
         const uint32_t image_header_offset = ph.image_header_word_offset * 4;
@@ -1128,6 +1161,12 @@ static void parse_zynq7000(Reader& reader, ParsedImage& img, LogCallback logger)
             add_partition_security_warning(pinfo,
                                            img,
                                            "partition marked encrypted; payload may be ciphertext and not directly executable.");
+        }
+        if (pinfo.auth_certificate.present && !pinfo.auth_certificate.header_readable) {
+            add_partition_security_warning(
+                pinfo,
+                img,
+                "authentication certificate offset is present but minimal header is unreadable.");
         }
 
         img.partitions.push_back(pinfo);
@@ -1157,6 +1196,10 @@ static void parse_zynqmp(Reader& reader, ParsedImage& img, LogCallback logger) {
                     img.boot_header.obfuscated_black_key_iv_present,
                     bh.obfuscated_black_key_iv,
                     3);
+    img.boot_header.key_rolling_words.assign(bh.obfuscated_black_key_storage,
+                                             bh.obfuscated_black_key_storage + 8);
+    img.boot_header.key_rolling_present =
+        has_non_placeholder_word(bh.obfuscated_black_key_storage, 8);
     add_boot_attribute(img, "fsbl_image_attributes", bh.fsbl_image_attributes);
     add_boot_region_diagnostic(img,
                                reader,
@@ -1276,6 +1319,18 @@ static void parse_zynqmp(Reader& reader, ParsedImage& img, LogCallback logger) {
         return;
     }
 
+    add_boot_attribute(img,
+                       "iht_header_authentication_certificate",
+                       iht.header_authentication_certificate);
+    if (has_valid_word_offset(iht.header_authentication_certificate)) {
+        add_boot_image_range(img,
+                             reader,
+                             logger,
+                             "IHT_AUTH_CERTIFICATE",
+                             static_cast<uint64_t>(iht.header_authentication_certificate) * 4,
+                             16);
+    }
+
     warn_if_invalid_checksum(img,
                              logger,
                              "ZynqMP image header table",
@@ -1313,7 +1368,8 @@ static void parse_zynqmp(Reader& reader, ParsedImage& img, LogCallback logger) {
         pinfo.data_size = ph.unencrypted_data_word_length * 4;
         pinfo.is_encrypted = (((ph.attributes >> 7) & 0x1) != 0) ||
                              is_present_length(ph.encrypted_partition_data_word_length);
-        pinfo.has_auth_certificate = has_valid_word_offset(ph.ac_offset) || (((ph.attributes >> 15) & 0x1) != 0);
+        parse_auth_certificate_from_word_offset(reader, ph.ac_offset, pinfo.auth_certificate);
+        pinfo.has_auth_certificate = pinfo.auth_certificate.present || (((ph.attributes >> 15) & 0x1) != 0);
         pinfo.checksum_type = decode_zynqmp_checksum_type(ph.attributes);
         pinfo.hash_algo = hash_algo_for_checksum_type(pinfo.checksum_type);
         pinfo.destination_cpu = decode_zynqmp_destination_cpu(ph.attributes);
@@ -1343,6 +1399,12 @@ static void parse_zynqmp(Reader& reader, ParsedImage& img, LogCallback logger) {
             add_partition_security_warning(pinfo,
                                            img,
                                            "partition marked encrypted; payload may be ciphertext and not directly executable.");
+        }
+        if (pinfo.auth_certificate.present && !pinfo.auth_certificate.header_readable) {
+            add_partition_security_warning(
+                pinfo,
+                img,
+                "authentication certificate offset is present but minimal header is unreadable.");
         }
 
         img.partitions.push_back(pinfo);
@@ -1456,6 +1518,35 @@ static void parse_versal_gen1(Reader& reader, ParsedImage& img, LogCallback logg
         return;
     }
 
+    add_boot_attribute(img, "meta_header_ac_offset", iht.meta_header_ac_offset);
+    add_boot_attribute(img, "authentication_header", iht.authentication_header);
+    add_boot_attribute(img, "hash_block_offset", iht.hash_block_offset);
+    add_boot_attribute(img, "hash_block_length", iht.hash_block_length);
+    if (has_valid_word_offset(iht.meta_header_ac_offset)) {
+        add_boot_image_range(img,
+                             reader,
+                             logger,
+                             "META_HEADER_AUTH_CERTIFICATE",
+                             static_cast<uint64_t>(iht.meta_header_ac_offset) * 4,
+                             16);
+    }
+    if (has_valid_word_offset(iht.authentication_header)) {
+        add_boot_image_range(img,
+                             reader,
+                             logger,
+                             "AUTHENTICATION_HEADER",
+                             static_cast<uint64_t>(iht.authentication_header) * 4,
+                             16);
+    }
+    if (has_valid_word_offset(iht.hash_block_offset) && is_present_length(iht.hash_block_length)) {
+        add_boot_image_range(img,
+                             reader,
+                             logger,
+                             "HASH_BLOCK",
+                             static_cast<uint64_t>(iht.hash_block_offset) * 4,
+                             static_cast<uint64_t>(iht.hash_block_length) * 4);
+    }
+
     warn_if_invalid_checksum(img,
                              logger,
                              "Versal Gen1 image header table",
@@ -1487,8 +1578,16 @@ static void parse_versal_gen1(Reader& reader, ParsedImage& img, LogCallback logg
         pinfo.data_offset = ph.actual_partition_word_offset * 4;
         pinfo.data_size = ph.unencrypted_data_word_length * 4;
         pinfo.is_encrypted = has_valid_word_offset(ph.encryption_key_select);
-        pinfo.has_auth_certificate = has_valid_word_offset(ph.hash_block_ac_offset) ||
-                                     has_valid_word_offset(ph.authentication_header);
+        set_iv_metadata(pinfo.partition_iv, pinfo.partition_iv_present, ph.iv, 3);
+        set_iv_metadata(pinfo.partition_iv_kek, pinfo.partition_iv_kek_present, ph.iv_kek_decryption, 3);
+        const bool has_hash_block_ac = has_valid_word_offset(ph.hash_block_ac_offset);
+        const bool has_auth_header = has_valid_word_offset(ph.authentication_header);
+        if (has_hash_block_ac) {
+            parse_auth_certificate_from_word_offset(reader, ph.hash_block_ac_offset, pinfo.auth_certificate);
+        } else if (has_auth_header) {
+            parse_auth_certificate_from_word_offset(reader, ph.authentication_header, pinfo.auth_certificate);
+        }
+        pinfo.has_auth_certificate = has_hash_block_ac || has_auth_header;
         pinfo.checksum_type = PartitionChecksumType::Unknown;
         pinfo.hash_algo = PartitionHashAlgorithm::Unknown;
         pinfo.destination_cpu = decode_versal_gen1_destination_cpu(ph.attributes);
@@ -1517,6 +1616,18 @@ static void parse_versal_gen1(Reader& reader, ParsedImage& img, LogCallback logg
             add_partition_security_warning(pinfo,
                                            img,
                                            "partition encryption key selector is present; payload may be ciphertext.");
+        }
+        if (has_hash_block_ac && has_auth_header && ph.hash_block_ac_offset != ph.authentication_header) {
+            add_partition_security_warning(
+                pinfo,
+                img,
+                "partition exposes both hash-block AC offset and authentication-header offset; parser currently prioritizes hash-block AC offset metadata.");
+        }
+        if (pinfo.auth_certificate.present && !pinfo.auth_certificate.header_readable) {
+            add_partition_security_warning(
+                pinfo,
+                img,
+                "authentication certificate offset is present but minimal header is unreadable.");
         }
 
         img.partitions.push_back(pinfo);
