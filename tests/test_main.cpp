@@ -50,7 +50,7 @@ void test_zynqmp_detection() {
     
     auto img = parse_image(reader);
     assert(img.arch == Arch::ZynqMP);
-    assert(img.format_name == "Xilinx Zynq UltraScale+ Boot Image");
+    assert(img.format_name == "Xilinx Zynq UltraScale+ MPSoC Boot Image");
     std::cout << "[OK] zynqmp_detection" << std::endl;
 }
 
@@ -59,10 +59,12 @@ void test_versal_detection() {
     uint32_t* words = reinterpret_cast<uint32_t*>(reader.data.data() + 0x10);
     words[0] = 0xAA995566;
     words[1] = 0x584C4E58; // XNLX
+    auto* bh = reinterpret_cast<versal::BootHeader*>(reader.data.data());
+    bh->meta_header_offset = 0x100;
     
     auto img = parse_image(reader);
-    assert(img.arch == Arch::PDI);
-    assert(img.format_name == "Xilinx Versal/Spartan PDI");
+    assert(img.arch == Arch::VersalGen1);
+    assert(img.format_name == "Xilinx Versal Adaptive SoC Gen 1 PDI");
     std::cout << "[OK] versal_detection" << std::endl;
 }
 
@@ -129,7 +131,7 @@ void test_versal_partitions() {
     bh->pmc_data_load_address = 0x11223344;
     bh->pmc_data_length = 0x500;
     bh->total_plm_length = 0x2100;
-    bh->meta_header_offset = 0x100 / 4; // Word offset
+    bh->meta_header_offset = 0x100;
     
     auto* iht = reinterpret_cast<versal::ImageHeaderTable*>(reader.data.data() + 0x100);
     iht->partition_header_offset = 0x200 / 4;
@@ -144,7 +146,7 @@ void test_versal_partitions() {
     ph1->next_partition_header_offset = 0; // End of list
     
     auto img = parse_image(reader);
-    assert(img.arch == Arch::PDI);
+    assert(img.arch == Arch::VersalGen1);
     assert(img.partitions.size() == 3); // PLM + PMC + Partition
     
     assert(img.partitions[0].name == "PLM");

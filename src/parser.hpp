@@ -7,7 +7,7 @@
 
 namespace xilinx {
 
-enum class Arch { Unknown, Zynq7000, ZynqMP, PDI };
+enum class Arch { Unknown, Zynq7000, ZynqMP, PDI, SpartanUltraScalePlus, VersalGen1, VersalGen2 };
 
 struct PartitionInfo {
     uint64_t load_address = 0;

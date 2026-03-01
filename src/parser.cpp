@@ -1,8 +1,36 @@
 #include "parser.hpp"
-#include <format>
+#include <cstdio>
 #include <ctype.h>
 
 namespace xilinx {
+
+static std::string format_name_for_arch(Arch arch) {
+    switch (arch) {
+        case Arch::Zynq7000:
+            return "Xilinx Zynq 7000 Boot Image";
+        case Arch::ZynqMP:
+            return "Xilinx Zynq UltraScale+ MPSoC Boot Image";
+        case Arch::VersalGen1:
+            return "Xilinx Versal Adaptive SoC Gen 1 PDI";
+        case Arch::SpartanUltraScalePlus:
+            return "Xilinx Spartan UltraScale+ PDI";
+        case Arch::VersalGen2:
+            return "Xilinx Versal AI Edge/Prime Gen 2 PDI";
+        case Arch::PDI:
+            return "Xilinx PDI Boot Image";
+        case Arch::Unknown:
+        default:
+            return "";
+    }
+}
+
+static bool looks_like_versal_gen1(Reader& reader) {
+    uint32_t meta_header_offset = reader.read_u32(0xC4);
+    if (meta_header_offset == 0 || meta_header_offset == 0xFFFFFFFF) {
+        return false;
+    }
+    return (meta_header_offset % 4) == 0;
+}
 
 std::string unpack_image_name(Reader& reader, uint32_t image_header_offset) {
     if (image_header_offset == 0 || image_header_offset == 0xFFFFFFFF) return "";
@@ -40,24 +68,20 @@ ParsedImage parse_image(Reader& reader, LogCallback logger) {
     if (zynq_magic[0] == 0xAA995566 && check_magic(zynq_magic[1])) {
         if (zynq_magic[3] == 0x01010000) {
             img.arch = Arch::Zynq7000;
-            img.format_name = "Xilinx Zynq 7000 Boot Image";
-            img.processor_name = "arm";
         } else {
             img.arch = Arch::ZynqMP;
-            img.format_name = "Xilinx Zynq UltraScale+ Boot Image";
-            img.processor_name = "arm";
         }
     } else {
         uint32_t pdi_magic[2] = {0};
         reader.read_bytes(0x10, pdi_magic, 8);
         if (pdi_magic[0] == 0xAA995566 && check_magic(pdi_magic[1])) {
-            img.arch = Arch::PDI;
-            img.format_name = "Xilinx Versal/Spartan PDI";
-            img.processor_name = "arm";
+            img.arch = looks_like_versal_gen1(reader) ? Arch::VersalGen1 : Arch::PDI;
         }
     }
 
     if (img.arch == Arch::Unknown) return img;
+    img.format_name = format_name_for_arch(img.arch);
+    img.processor_name = "arm";
 
     if (img.arch == Arch::Zynq7000) {
         zynq7000::BootHeader bh;
@@ -68,7 +92,12 @@ ParsedImage parse_image(Reader& reader, LogCallback logger) {
         img.bootloader_offset = bh.source_offset;
         img.bootloader_size = bh.fsbl_image_length;
 
-        if (logger) logger(std::format("Zynq 7000 Boot Header parsed. FSBL Exec: 0x{:08X}\n", img.bootloader_exec_address));
+        if (logger) {
+            char msg[128] = {0};
+            std::snprintf(msg, sizeof(msg), "Zynq 7000 Boot Header parsed. FSBL Exec: 0x%08X\n",
+                          static_cast<unsigned int>(img.bootloader_exec_address));
+            logger(msg);
+        }
 
         uint32_t iht_offset = bh.image_header_table_offset;
         uint32_t version = reader.read_u32(iht_offset);
@@ -118,7 +147,12 @@ ParsedImage parse_image(Reader& reader, LogCallback logger) {
         img.bootloader_offset = bh.source_offset;
         img.bootloader_size = bh.fsbl_image_length;
 
-        if (logger) logger(std::format("ZynqMP Boot Header parsed. FSBL Exec: 0x{:08X}\n", img.bootloader_exec_address));
+        if (logger) {
+            char msg[128] = {0};
+            std::snprintf(msg, sizeof(msg), "ZynqMP Boot Header parsed. FSBL Exec: 0x%08X\n",
+                          static_cast<unsigned int>(img.bootloader_exec_address));
+            logger(msg);
+        }
 
         uint32_t iht_offset = bh.image_header_table_offset;
         uint32_t version = reader.read_u32(iht_offset);
@@ -159,11 +193,11 @@ ParsedImage parse_image(Reader& reader, LogCallback logger) {
             }
         }
     }
-    else if (img.arch == Arch::PDI) {
+    else if (img.arch == Arch::PDI || img.arch == Arch::VersalGen1) {
         versal::BootHeader bh;
         if (!reader.read_bytes(0, &bh, sizeof(bh))) return img;
 
-        if (logger) logger(std::format("PDI Boot Header parsed. PLM Exec: 0xF0280000\n"));
+        if (logger) logger("PDI Boot Header parsed. PLM Exec: 0xF0280000\n");
 
         if (bh.plm_length > 0 && bh.plm_length != 0xFFFFFFFF) {
             PartitionInfo plm;
