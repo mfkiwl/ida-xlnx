@@ -27,7 +27,7 @@ public:
         IdaReader reader(file);
         auto img = xilinx::parse_image(reader);
         
-        if (img.arch != xilinx::Arch::Unknown) {
+        if (img.arch != xilinx::Arch::Unknown && img.load_supported) {
             return ida::loader::AcceptResult{
                 .format_name = img.format_name,
                 .processor_name = img.processor_name
@@ -45,7 +45,21 @@ public:
         
         auto img = xilinx::parse_image(reader, logger);
 
-        ida::loader::set_processor(img.processor_name);
+        if (img.arch == xilinx::Arch::Unknown) {
+            return std::unexpected(ida::Error::unsupported("Unsupported or unrecognized Xilinx image."));
+        }
+        if (!img.load_supported) {
+            std::string msg = "Detected " + img.format_name + " but safe loading is disabled for this family.";
+            if (!img.warnings.empty()) {
+                msg += " " + img.warnings.front();
+            }
+            return std::unexpected(ida::Error::unsupported(msg));
+        }
+
+        auto proc_status = ida::loader::set_processor(img.processor_name);
+        if (!proc_status) {
+            return std::unexpected(proc_status.error());
+        }
 
         if (img.bootloader_size > 0 && img.bootloader_load_address != 0xFFFFFFFF) {
             ida::segment::create(

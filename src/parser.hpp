@@ -21,6 +21,8 @@ struct ParsedImage {
     Arch arch = Arch::Unknown;
     std::string format_name;
     std::string processor_name;
+    bool load_supported = false;
+    std::vector<std::string> warnings;
 
     uint64_t bootloader_load_address = 0;
     uint64_t bootloader_exec_address = 0;

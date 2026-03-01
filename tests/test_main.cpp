@@ -38,6 +38,7 @@ void test_zynq7000_detection() {
     auto img = parse_image(reader);
     assert(img.arch == Arch::Zynq7000);
     assert(img.format_name == "Xilinx Zynq 7000 Boot Image");
+    assert(img.load_supported);
     std::cout << "[OK] zynq7000_detection" << std::endl;
 }
 
@@ -51,6 +52,7 @@ void test_zynqmp_detection() {
     auto img = parse_image(reader);
     assert(img.arch == Arch::ZynqMP);
     assert(img.format_name == "Xilinx Zynq UltraScale+ MPSoC Boot Image");
+    assert(img.load_supported);
     std::cout << "[OK] zynqmp_detection" << std::endl;
 }
 
@@ -75,6 +77,7 @@ void test_versal_detection() {
     auto img = parse_image(reader);
     assert(img.arch == Arch::VersalGen1);
     assert(img.format_name == "Xilinx Versal Adaptive SoC Gen 1 PDI");
+    assert(img.load_supported);
     std::cout << "[OK] versal_detection" << std::endl;
 }
 
@@ -95,6 +98,8 @@ void test_spartan_detection() {
     auto img = parse_image(reader);
     assert(img.arch == Arch::SpartanUltraScalePlus);
     assert(img.format_name == "Xilinx Spartan UltraScale+ PDI");
+    assert(!img.load_supported);
+    assert(!img.warnings.empty());
     std::cout << "[OK] spartan_detection" << std::endl;
 }
 
@@ -124,6 +129,8 @@ void test_versal_gen2_detection() {
     auto img = parse_image(reader);
     assert(img.arch == Arch::VersalGen2);
     assert(img.format_name == "Xilinx Versal AI Edge/Prime Gen 2 PDI");
+    assert(!img.load_supported);
+    assert(!img.warnings.empty());
     std::cout << "[OK] versal_gen2_detection" << std::endl;
 }
 
@@ -135,6 +142,7 @@ void test_weak_pdi_rejected() {
 
     auto img = parse_image(reader);
     assert(img.arch == Arch::Unknown);
+    assert(!img.load_supported);
     std::cout << "[OK] weak_pdi_rejected" << std::endl;
 }
 
@@ -171,6 +179,7 @@ void test_zynq7000_partitions() {
     
     auto img = parse_image(reader);
     assert(img.arch == Arch::Zynq7000);
+    assert(img.load_supported);
     assert(img.bootloader_exec_address == 0x11223344);
     assert(img.partitions.size() == 1);
     assert(img.partitions[0].name == "FSBL10.ELF");
@@ -222,6 +231,7 @@ void test_versal_partitions() {
     
     auto img = parse_image(reader);
     assert(img.arch == Arch::VersalGen1);
+    assert(img.load_supported);
     assert(img.partitions.size() == 3); // PLM + PMC + Partition
     
     assert(img.partitions[0].name == "PLM");

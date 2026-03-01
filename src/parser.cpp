@@ -24,6 +24,13 @@ static std::string format_name_for_arch(Arch arch) {
     }
 }
 
+static void add_warning(ParsedImage& img, LogCallback logger, const std::string& message) {
+    img.warnings.push_back(message);
+    if (logger) {
+        logger("WARNING: " + message + "\n");
+    }
+}
+
 static bool read_u32_at(Reader& reader, uint32_t offset, uint32_t& value) {
     return reader.read_bytes(offset, &value, sizeof(value));
 }
@@ -523,28 +530,44 @@ ParsedImage parse_image(Reader& reader, LogCallback logger) {
 
     if (img.arch == Arch::Unknown) return img;
     img.format_name = format_name_for_arch(img.arch);
-    img.processor_name = "arm";
 
     switch (img.arch) {
         case Arch::Zynq7000:
+            img.load_supported = true;
+            img.processor_name = "arm";
             parse_zynq7000(reader, img, logger);
             break;
         case Arch::ZynqMP:
+            img.load_supported = true;
+            img.processor_name = "arm";
             parse_zynqmp(reader, img, logger);
             break;
         case Arch::VersalGen1:
-        case Arch::PDI:
+            img.load_supported = true;
+            img.processor_name = "arm";
             parse_versal_gen1(reader, img, logger);
+            break;
+        case Arch::PDI:
+            add_warning(img, logger,
+                        "Generic PDI family detected without deterministic sub-family classification; loading is disabled for safety.");
             break;
         case Arch::SpartanUltraScalePlus:
             parse_spartan(reader, img, logger);
+            add_warning(img, logger,
+                        "Spartan UltraScale+ family is detected but full partition mapping is not implemented yet; image load is disabled to avoid unsafe mapping.");
             break;
         case Arch::VersalGen2:
             parse_versal_gen2(reader, img, logger);
+            add_warning(img, logger,
+                        "Versal Gen2 family is detected but full partition mapping is not implemented yet; image load is disabled to avoid unsafe mapping.");
             break;
         case Arch::Unknown:
         default:
             break;
+    }
+
+    if (!img.load_supported) {
+        img.processor_name.clear();
     }
 
     return img;
